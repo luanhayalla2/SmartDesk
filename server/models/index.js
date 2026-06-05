@@ -37,4 +37,9 @@ if (models.User && models.Comment) {
   models.Comment.belongsTo(models.User, { foreignKey: 'usuario_id', as: 'autor' });
 }
 
+if (models.Ticket && models.SatisfactionSurvey) {
+  models.Ticket.hasOne(models.SatisfactionSurvey, { foreignKey: 'ticket_id', as: 'pesquisaSatisfacao' });
+  models.SatisfactionSurvey.belongsTo(models.Ticket, { foreignKey: 'ticket_id', as: 'ticket' });
+}
+
 module.exports = { sequelize, ...models };

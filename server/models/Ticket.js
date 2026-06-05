@@ -15,8 +15,24 @@ const Ticket = sequelize.define('Ticket', {
     type: DataTypes.TEXT,
     allowNull: false,
   },
+  problema: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
   categoria: {
-    type: DataTypes.ENUM('Hardware','Software','Rede','Servidor','Banco de Dados','Sistema','Segurança','Outros'),
+    type: DataTypes.ENUM('Impressoras','Computadores','Redes','Sistemas','Banco de Dados','Outros'),
+    allowNull: false,
+  },
+  subcategoria: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  unidade_senac: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  setor: {
+    type: DataTypes.STRING,
     allowNull: false,
   },
   prioridade: {
@@ -38,6 +54,22 @@ const Ticket = sequelize.define('Ticket', {
   },
   responsavel: {
     type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  anexo_url: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  sla_resposta: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+  sla_solucao: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+  tempo_gasto: {
+    type: DataTypes.INTEGER, // em minutos
     allowNull: true,
   },
   data_abertura: {

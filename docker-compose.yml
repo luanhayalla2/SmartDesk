@@ -1,11 +1,14 @@
 version: '3.9'
 
 services:
+
   smartdesk-app:
     build: .
     container_name: smartdesk-app
+
     ports:
       - "3000:3000"
+
     environment:
       NODE_ENV: development
       DB_HOST: mysql
@@ -13,31 +16,43 @@ services:
       DB_NAME: smartdesk
       DB_USER: root
       DB_PASSWORD: root
+
       JWT_SECRET: smartdesk_secret
       JWT_EXPIRES_IN: 1d
+
     depends_on:
       - mysql
+
     restart: unless-stopped
 
   mysql:
     image: mysql:8.0
+
     container_name: smartdesk-mysql
+
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: smartdesk
+
     ports:
       - "3306:3306"
+
     volumes:
       - mysql_data:/var/lib/mysql
+
     restart: unless-stopped
 
   adminer:
     image: adminer
+
     container_name: smartdesk-adminer
+
     ports:
       - "8080:8080"
+
     depends_on:
       - mysql
+
     restart: unless-stopped
 
 volumes:

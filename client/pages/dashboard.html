@@ -52,7 +52,12 @@
   </nav>
 
   <main class="container my-5">
-    <h1 class="mb-4 display-6 fw-bold text-center text-primary">Visão geral dos tickets</h1>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h1 class="display-6 fw-bold text-primary m-0">Visão geral dos tickets</h1>
+      <button class="btn btn-primary btn-lg shadow-sm" data-bs-toggle="modal" data-bs-target="#newTicketModal">
+        + Novo Chamado
+      </button>
+    </div>
     <div class="row g-4 mb-4">
       <!-- Card exemplo: Total de tickets -->
       <div class="col-md-3">
@@ -107,6 +112,62 @@
       </table>
     </div>
   </main>
+
+  <!-- Modal Novo Chamado -->
+  <div class="modal fade" id="newTicketModal" tabindex="-1" aria-labelledby="newTicketModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg">
+        <form id="newTicketForm">
+          <div class="modal-header bg-primary text-white border-0">
+            <h5 class="modal-title" id="newTicketModalLabel">Abertura de Chamado</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body p-4">
+            <div class="mb-3">
+              <label for="titulo" class="form-label fw-bold">Título do Chamado</label>
+              <input type="text" class="form-control" id="titulo" required placeholder="Ex: Erro ao imprimir">
+            </div>
+            
+            <div class="mb-3">
+              <label for="problema" class="form-label fw-bold">Selecione o Problema</label>
+              <select class="form-select" id="problema" required>
+                <option value="" selected disabled>Escolha na lista pré-definida...</option>
+                <optgroup label="N1 (Suporte Básico)">
+                  <option value="Config. de Impressoras">Configuração de Impressoras</option>
+                  <option value="Suporte básico no S.O">Suporte básico no S.O</option>
+                  <option value="Reset de senha do usuário Windows">Reset de senha do usuário Windows</option>
+                </optgroup>
+                <optgroup label="N2 (Infra/Redes/Servidores)">
+                  <option value="Problemas na rede corporativa">Problemas na rede corporativa</option>
+                  <option value="Configuração de servidor">Configuração de servidor</option>
+                  <option value="login de usuário de domínio">Login de usuário de domínio</option>
+                </optgroup>
+                <optgroup label="N3 (Sistemas Críticos/Banco de Dados)">
+                  <option value="Problemas no banco de dados">Problemas no banco de dados</option>
+                  <option value="Falhas de login na infraestrutura Captive">Falhas de login na infraestrutura Captive</option>
+                  <option value="Interrupção de acesso a Sistema Corporativo">Interrupção de acesso a Sistema Corporativo</option>
+                </optgroup>
+              </select>
+              <div class="form-text">O sistema identificará o nível de suporte automaticamente e enviará instantaneamente para a fila do responsável.</div>
+            </div>
+
+            <div class="mb-3">
+              <label for="descricao" class="form-label fw-bold">Descrição Detalhada</label>
+              <textarea class="form-control" id="descricao" rows="3" required placeholder="Descreva os detalhes do problema..."></textarea>
+            </div>
+            
+            <!-- Hidden inputs para não quebrar validação do backend caso necessário -->
+            <input type="hidden" id="categoria" value="Outros">
+            <input type="hidden" id="prioridade" value="Média">
+          </div>
+          <div class="modal-footer border-0">
+            <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+            <button type="submit" class="btn btn-primary px-4">Abrir Chamado</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
 
   <footer class="footer bg-white">
     <div class="container">
@@ -165,6 +226,44 @@
       if (res.ok) loadTickets();
     }
     loadTickets();
+
+    // Handler para criar novo chamado
+    document.getElementById('newTicketForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const titulo = document.getElementById('titulo').value;
+      const problema = document.getElementById('problema').value;
+      const descricao = document.getElementById('descricao').value;
+      const categoria = document.getElementById('categoria').value;
+      const prioridade = document.getElementById('prioridade').value;
+
+      try {
+        const res = await fetch('/api/tickets', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ titulo, problema, descricao, categoria, prioridade })
+        });
+
+        if (res.ok) {
+          // Fecha modal e recarrega tickets
+          const modalEl = document.getElementById('newTicketModal');
+          const modal = bootstrap.Modal.getInstance(modalEl);
+          modal.hide();
+          e.target.reset();
+          loadTickets();
+          alert('Chamado criado e encaminhado automaticamente para o nível responsável!');
+        } else {
+          const errorData = await res.json();
+          alert('Erro ao criar chamado: ' + (errorData.error || 'Erro desconhecido'));
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Erro de conexão ao criar chamado.');
+      }
+    });
   </script>
 </body>
 </html>

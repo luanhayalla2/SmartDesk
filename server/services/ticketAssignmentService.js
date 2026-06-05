@@ -7,19 +7,50 @@ require('dotenv').config();
  * Returns the assigned user (or null if none found).
  */
 async function assignTicket(ticket) {
-  const levelMap = {
-    Simples: 'n1',
-    Intermediária: 'n2',
-    Avançada: 'n3',
+  // Mapa de problemas para níveis (HelpDesk Corporativo)
+  const problemaNivelMap = {
+    // N1
+    'Config. de Impressoras': 'n1',
+    'Suporte básico no S.O': 'n1',
+    'Config. de Impressoras': 'Técnico N1',
+    'Suporte básico no S.O': 'Técnico N1',
+    'Reset de senha do usuário Windows': 'Técnico N1',
+    // N2
+    'Problemas na rede corporativa': 'Analista N2',
+    'Configuração de servidor': 'Analista N2',
+    'login de usuário de domínio': 'Analista N2',
+    // N3
+    'Problemas no banco de dados': 'Especialista N3',
+    'Falhas de login na infraestrutura Captive': 'Especialista N3',
+    'Interrupção de acesso a Sistema Corporativo': 'Especialista N3',
   };
-  const targetLevel = levelMap[ticket.complexidade];
-  if (!targetLevel) return null;
 
-  // Find first user with the target level (excluding admin)
-  const user = await User.findOne({ where: { nivel: targetLevel } });
+  const levelMap = {
+    Simples: 'Técnico N1',
+    Intermediária: 'Analista N2',
+    Avançada: 'Especialista N3',
+  };
+
+  // Identifica o nível do suporte selecionado
+  let targetLevel = 'Técnico N1'; // Default
+  if (ticket.problema && problemaNivelMap[ticket.problema]) {
+    targetLevel = problemaNivelMap[ticket.problema];
+  } else if (ticket.complexidade) {
+    targetLevel = levelMap[ticket.complexidade] || 'Técnico N1';
+  }
+
+  // Find user with the target level and lowest active tickets
+  const user = await User.findOne({ 
+    where: { nivel: targetLevel },
+    order: [['chamados_ativos', 'ASC']]
+  });
+  
   if (user) {
     ticket.responsavel = user.id;
     await ticket.save();
+
+    user.chamados_ativos = (user.chamados_ativos || 0) + 1;
+    await user.save();
     // Log assignment
     await AuditLog.create({
       usuario_id: user.id,
@@ -40,19 +71,32 @@ async function assignTicket(ticket) {
  */
 async function escalateTicket(ticket) {
   const escalationPath = {
-    n1: 'n2',
-    n2: 'n3',
-    n3: null, // already highest
+    'Técnico N1': 'Analista N2',
+    'Analista N2': 'Especialista N3',
+    'Especialista N3': null, // already highest
   };
-  const currentLevel = ticket.responsavel
-    ? (await User.findByPk(ticket.responsavel)).nivel
-    : null;
+  const prevUser = ticket.responsavel ? await User.findByPk(ticket.responsavel) : null;
+  const currentLevel = prevUser ? prevUser.nivel : 'Técnico N1';
+  
   const nextLevel = escalationPath[currentLevel];
   if (!nextLevel) return null;
-  const nextUser = await User.findOne({ where: { nivel: nextLevel } });
+  
+  const nextUser = await User.findOne({ 
+    where: { nivel: nextLevel },
+    order: [['chamados_ativos', 'ASC']]
+  });
+  
   if (nextUser) {
     ticket.responsavel = nextUser.id;
     await ticket.save();
+
+    nextUser.chamados_ativos = (nextUser.chamados_ativos || 0) + 1;
+    await nextUser.save();
+
+    if (prevUser && prevUser.chamados_ativos > 0) {
+      prevUser.chamados_ativos -= 1;
+      await prevUser.save();
+    }
     await AuditLog.create({
       usuario_id: nextUser.id,
       acao: 'escalate',

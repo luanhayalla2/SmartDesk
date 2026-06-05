@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { createUser, getUser, updateUser, deleteUser, listUsers } = require('../controllers/userController');
-const { auth } = require('../middlewares/auth');
+const auth = require('../middlewares/auth');
 const { roleCheck } = require('../middlewares/roleCheck');
 
 // All routes require authentication and admin role

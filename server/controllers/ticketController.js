@@ -1,5 +1,6 @@
 const { Ticket, User, History, AuditLog } = require('../models');
 const ticketAssignmentService = require('../services/ticketAssignmentService');
+const slaService = require('../services/slaService');
 const { Op } = require('sequelize');
 
 // Helper para registrar auditoria
@@ -21,27 +22,45 @@ async function logAction({ usuarioId, acao, entidade, entidadeId, descricao, req
 
 // Create a new ticket – any authenticated user can open
 exports.createTicket = async (req, res) => {
-  const { titulo, descricao, categoria, prioridade, complexidade } = req.body;
+  const { titulo, descricao, categoria, prioridade, complexidade, problema, unidade_senac, setor, subcategoria, anexo_url } = req.body;
+  
+  if (!unidade_senac || !setor || !subcategoria) {
+    return res.status(400).json({ error: 'Campos unidade_senac, setor e subcategoria são obrigatórios' });
+  }
+
   const solicitanteId = req.user.id;
   try {
     const ticket = await Ticket.create({
       titulo,
       descricao,
       categoria,
+      subcategoria,
+      unidade_senac,
+      setor,
+      problema,
       prioridade,
       complexidade,
+      anexo_url,
       status: 'Aberto',
       solicitante: solicitanteId,
       data_abertura: new Date(),
     });
     // Atribuição automática usando o serviço
-    await ticketAssignmentService.assignTicket(ticket);
+    const assignedUser = await ticketAssignmentService.assignTicket(ticket);
+    const nivel = assignedUser ? assignedUser.nivel : 'Técnico N1';
+    
+    // Calcula o SLA
+    const sla = slaService.calculateSLA(nivel, ticket.data_abertura);
+    ticket.sla_resposta = sla.slaResposta;
+    ticket.sla_solucao = sla.slaSolucao;
+    await ticket.save();
+
     await logAction({
       usuarioId: solicitanteId,
       acao: 'create',
       entidade: 'Ticket',
       entidadeId: ticket.id,
-      descricao: `Ticket criado com complexidade ${complexidade}`,
+      descricao: `Ticket criado com SLA para nível ${nivel}`,
       req,
     });
     res.status(201).json(ticket);
@@ -105,11 +124,19 @@ exports.getTicketById = async (req, res) => {
 exports.updateTicket = async (req, res) => {
   const { id } = req.params;
   const user = req.user;
-  const allowedFields = ['titulo', 'descricao', 'categoria', 'prioridade', 'complexidade', 'status'];
+  const allowedFields = ['titulo', 'descricao', 'categoria', 'prioridade', 'complexidade', 'status', 'tempo_gasto'];
   const updates = {};
   for (const field of allowedFields) {
     if (req.body[field] !== undefined) updates[field] = req.body[field];
   }
+  
+  if (updates.status === 'Resolvido') {
+    if (!req.body.solucao_aplicada || req.body.tempo_gasto === undefined) {
+      return res.status(400).json({ error: 'Para resolver um chamado, solucao_aplicada e tempo_gasto são obrigatórios' });
+    }
+    updates.data_fechamento = new Date(); // Pode aguardar 5 dias, mas marcamos a resolução aqui.
+  }
+
   try {
     const ticket = await Ticket.findByPk(id);
     if (!ticket) return res.status(404).json({ error: 'Ticket não encontrado' });
@@ -120,11 +147,16 @@ exports.updateTicket = async (req, res) => {
       return res.status(403).json({ error: 'Permissão insuficiente' });
     }
     await ticket.update(updates);
+
+    const descricaoHistorico = updates.status === 'Resolvido' 
+      ? `Ticket resolvido. Solução: ${req.body.solucao_aplicada} | Tempo: ${req.body.tempo_gasto}min`
+      : `Ticket atualizado: ${JSON.stringify(updates)}`;
+
     await History.create({
       ticket_id: ticket.id,
       usuario_id: user.id,
-      acao: 'update',
-      descricao: `Ticket atualizado: ${JSON.stringify(updates)}`,
+      acao: updates.status === 'Resolvido' ? 'resolve' : 'update',
+      descricao: descricaoHistorico,
       data: new Date(),
     });
     await logAction({
@@ -132,7 +164,7 @@ exports.updateTicket = async (req, res) => {
       acao: 'update',
       entidade: 'Ticket',
       entidadeId: ticket.id,
-      descricao: `Atualização de campos ${Object.keys(updates).join(', ')}`,
+      descricao: `Atualização de status/campos`,
       req,
     });
     res.json(ticket);
@@ -183,38 +215,52 @@ exports.assignTicket = async (req, res) => {
 exports.escalateTicket = async (req, res) => {
   const { id } = req.params;
   const user = req.user;
+  const { motivo, diagnostico, acoes_executadas } = req.body;
+
+  if (!motivo || !diagnostico || !acoes_executadas) {
+    return res.status(400).json({ error: 'Para escalonar, envie motivo, diagnostico e acoes_executadas' });
+  }
+
   try {
     const ticket = await Ticket.findByPk(id);
     if (!ticket) return res.status(404).json({ error: 'Ticket não encontrado' });
-    // Verifica se o usuário atual tem permissão para escalar (responsável ou admin)
+    
+    // Verifica permissão
     if (user.nivel !== 'admin' && ticket.responsavel !== user.id) {
       return res.status(403).json({ error: 'Permissão insuficiente para escalonar' });
     }
-    // Determina próximo nível
-    const níveis = ['n1', 'n2', 'n3'];
-    const atualIdx = níveis.indexOf(ticket.nivel_atual || 'n1');
-    const proximo = níveis[atualIdx + 1];
-    if (!proximo) return res.status(400).json({ error: 'Ticket já está no nível máximo' });
-    // Atualiza responsável para o próximo nível (simples: busca primeiro usuário do próximo nível)
-    const nextUser = await User.findOne({ where: { nivel: proximo } });
-    if (!nextUser) return res.status(400).json({ error: `Nenhum usuário encontrado para nível ${proximo}` });
-    await ticket.update({ responsavel: nextUser.id, nivel_atual: proximo });
+    
+    // Tenta escalonar usando o serviço
+    const nextUser = await ticketAssignmentService.escalateTicket(ticket);
+    if (!nextUser) {
+      return res.status(400).json({ error: 'Ticket já está no nível máximo ou não foi possível escalonar' });
+    }
+
+    // Calcula novo SLA para o nível escalonado
+    const sla = slaService.calculateSLA(nextUser.nivel, new Date());
+    ticket.sla_resposta = sla.slaResposta;
+    ticket.sla_solucao = sla.slaSolucao;
+    await ticket.save();
+
+    const descricaoHist = `Escalonado para ${nextUser.nivel}. Motivo: ${motivo} | Diag: ${diagnostico} | Ações: ${acoes_executadas}`;
+
     await History.create({
       ticket_id: ticket.id,
       usuario_id: user.id,
       acao: 'escalate',
-      descricao: `Escalonado para ${proximo}`,
+      descricao: descricaoHist,
       data: new Date(),
     });
+
     await logAction({
       usuarioId: user.id,
       acao: 'escalate',
       entidade: 'Ticket',
       entidadeId: ticket.id,
-      descricao: `Escalonado para ${proximo}`,
+      descricao: `Ticket escalonado para ${nextUser.nivel}`,
       req,
     });
-    res.json({ message: `Ticket escalonado para ${proximo}` });
+    res.json({ message: `Ticket escalonado para ${nextUser.nivel}`, novoResponsavel: nextUser.id });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erro ao escalonar ticket' });
